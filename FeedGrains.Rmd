@@ -1,0 +1,83 @@
+---
+title: "Feed Grains"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Working with the USDA ERS Feed Grains Database
+
+This database contains among other things historical entries from the WASDE report. I need this information a lot both in teaching and research. It's absolutely essential to maintain an accurate historical view of our most important food crops. But the data is presented in an Excel sheet that's great for viewing, but really hard to work with and automatically analyze. 
+
+![](excelFG.png)
+
+
+
+
+
+I have spent many hours manually creating dates dragging them by hand in order to create a basic chart from this dataset. 
+
+So today I wrote an R script that grabs the most recent spreadsheet imports it into R, and makes it "tidy".
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(readxl)
+library(httr)
+library(tidyr)
+
+
+tmp <- tempfile(fileext = ".xls")
+
+httr::GET(url = "https://www.ers.usda.gov/webdocs/DataFiles/50048/Feed%20Grains%20Yearbook%20Tables-All%20Years.xls",
+          write_disk( tmp) )
+
+data_xl <- read_excel(tmp, sheet = "FGYearbookTable04-Full", 
+                      skip = 4, 
+                      col_names = c("MktYear", "Quarter", "BeginningStocks", "Production", "Imports", 
+                                    "TotalSupply", "FoodAlcoholInd", "Seed", "FeedandResidual", 
+                                    "TotalDomestic", "Exports", "TotalUse", "EndingStocks")) %>%
+  fill(MktYear) %>% 
+  # Make columns for more standard date handling
+  mutate(month = ifelse(Quarter =="Q1 Sep-Nov", "09-01", 
+                        ifelse(Quarter == "Q2 Dec-Feb", "12-01", 
+                               ifelse(Quarter == "Q3 Mar-May", "03-01", 
+                                      ifelse(Quarter == "Q4 Jun-Aug", "06-01",
+                                             ifelse(Quarter == "MY Sep-Aug", "09-01", NA)))))) %>%
+  mutate(year = ifelse(Quarter =="Q1 Sep-Nov" | Quarter == "Q2 Dec-Feb" | Quarter == "MY Sep-Aug", as.numeric(str_sub(MktYear, 1,4)), 
+                       as.numeric(str_sub(MktYear, 1,4)) +1 )) %>%
+  mutate(date = as.Date(paste0(as.character(year), "-", month))) # Now we have a proper date column.
+
+```
+
+
+
+## Making the data "Tidy"
+
+Now lets transform the data from 'wide' formet to 'long' format so we can make nice graphs with `ggplot2`.
+
+```{r , message = FALSE, warning = FALSE}
+# Make tidy getting ready for ggplot
+data_tidy <- data_xl %>% 
+  select(c(-MktYear, -month, -year)) %>%
+  pivot_longer(c(-date, -Quarter), names_to = "UseCategory", values_to = "Value")
+
+data_tidy
+```
+
+
+Now let's plot the corn dissapearance
+
+```{r}
+# Plot the Marketing Year Data
+data_tidy %>% filter(Quarter == "MY Sep-Aug") %>%
+  filter(UseCategory %in% c("FoodAlcoholInd", "Seed", "FeedandResidual", "Exports", "EndingStocks")) %>%
+  ggplot(aes(x = date, y = Value, fill = UseCategory)) + 
+  geom_area() + 
+  theme_bw() +
+  labs(x = "", y = "Millions of bushels", title = "Corn Use Categories Since 1975")
+
+```
+
+This is one of those posts I know I will come back to again and again myself. I hope you find it helpful!
